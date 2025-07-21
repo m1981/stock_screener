@@ -21,7 +21,7 @@ st.sidebar.header("Parameters")
 
 # Date range selection
 today = datetime.today()
-default_start = today - timedelta(days=365)
+default_start = today - timedelta(days=500)  # Increased from 365 to 500
 start_date = st.sidebar.date_input("Start Date", default_start)
 end_date = st.sidebar.date_input("End Date", today)
 
@@ -44,13 +44,16 @@ lookback_period = st.sidebar.slider("Lookback Period (days)",
                                    min_value=10, max_value=252, value=60)
 
 # Stock selection
-default_stocks = ["AAPL", "MSFT", "GOOGL", "AMZN", "META"]
+default_stocks = ["AAPL", "MSFT", "OPXS", "RBLX", "NVDA", "DASH", "AEVA", "TSLA", "MU", "CCRD", "GE", "EPSN"]
 stocks_input = st.sidebar.text_area("Enter Stock Tickers (comma separated)",
                                    ",".join(default_stocks))
 stock_list = [ticker.strip() for ticker in stocks_input.split(",")]
 
 # Function to calculate metrics
 def calculate_metrics(stock_data, benchmark_data, lookback):
+    if stock_data is None or benchmark_data is None:
+        return None
+    
     metrics = {}
 
     # Calculate returns
@@ -59,6 +62,8 @@ def calculate_metrics(stock_data, benchmark_data, lookback):
 
     # Align the data
     aligned_data = pd.concat([stock_returns, benchmark_returns], axis=1).dropna()
+    
+    # Check if we have enough data - need at least lookback days
     if len(aligned_data) < lookback:
         return None
 
@@ -69,40 +74,45 @@ def calculate_metrics(stock_data, benchmark_data, lookback):
     # Calculate excess returns
     excess_returns = stock_returns - benchmark_returns
 
+    # Use the last 'lookback' period for calculations
+    recent_stock_returns = stock_returns.tail(lookback)
+    recent_benchmark_returns = benchmark_returns.tail(lookback)
+    recent_excess_returns = excess_returns.tail(lookback)
+
     # Information Ratio
-    mean_excess = excess_returns.rolling(window=lookback).mean().iloc[-1]
-    tracking_error = excess_returns.rolling(window=lookback).std().iloc[-1]
-    if tracking_error != 0:
+    mean_excess = recent_excess_returns.mean()
+    tracking_error = recent_excess_returns.std()
+    if tracking_error != 0 and not np.isnan(tracking_error):
         metrics['Information Ratio'] = mean_excess / tracking_error
     else:
         metrics['Information Ratio'] = np.nan
 
     # Beta
-    covariance = stock_returns.rolling(window=lookback).cov(benchmark_returns).iloc[-1]
-    benchmark_variance = benchmark_returns.rolling(window=lookback).var().iloc[-1]
-    if benchmark_variance != 0:
+    covariance = np.cov(recent_stock_returns, recent_benchmark_returns)[0, 1]
+    benchmark_variance = recent_benchmark_returns.var()
+    if benchmark_variance != 0 and not np.isnan(benchmark_variance):
         beta = covariance / benchmark_variance
     else:
         beta = np.nan
     metrics['Beta'] = beta
 
     # Alpha (annualized)
-    risk_free_rate = 0.03 / 252  # Approximate daily risk-free rate
-    expected_return = risk_free_rate + beta * (benchmark_returns.mean() - risk_free_rate)
-    alpha = stock_returns.mean() - expected_return
+    risk_free_rate = 0.03 / 252
+    expected_return = risk_free_rate + beta * (recent_benchmark_returns.mean() - risk_free_rate)
+    alpha = recent_stock_returns.mean() - expected_return
     metrics['Alpha (daily)'] = alpha
     metrics['Alpha (annualized)'] = alpha * 252
 
     # Relative Strength
-    stock_cumulative = (1 + stock_returns).cumprod().iloc[-1]
-    benchmark_cumulative = (1 + benchmark_returns).cumprod().iloc[-1]
+    stock_cumulative = (1 + recent_stock_returns).cumprod().iloc[-1]
+    benchmark_cumulative = (1 + recent_benchmark_returns).cumprod().iloc[-1]
     metrics['Relative Strength'] = stock_cumulative / benchmark_cumulative
 
-    # Total Return
+    # Total Return (for the lookback period)
     metrics['Total Return'] = stock_cumulative - 1
 
     # Sharpe Ratio (annualized)
-    sharpe = (stock_returns.mean() - risk_free_rate) / stock_returns.std() * np.sqrt(252)
+    sharpe = (recent_stock_returns.mean() - risk_free_rate) / recent_stock_returns.std() * np.sqrt(252)
     metrics['Sharpe Ratio'] = sharpe
 
     return metrics
@@ -110,23 +120,27 @@ def calculate_metrics(stock_data, benchmark_data, lookback):
 def safe_download(ticker, start_date, end_date):
     """Safely download and extract Adj Close data"""
     try:
-        data = yf.download(ticker, start=start_date, end=end_date, progress=False)
+        # Add auto_adjust=False to suppress warning and get Adj Close
+        data = yf.download(ticker, start=start_date, end=end_date, progress=False, auto_adjust=False)
         
         if data.empty:
             return None
             
-        # Debug: print column structure
-        print(f"Columns for {ticker}: {data.columns.tolist()}")
-        
-        # Try different ways to get Adj Close
-        if 'Adj Close' in data.columns:
-            return data['Adj Close']
-        elif hasattr(data.columns, 'levels') and 'Adj Close' in data.columns.levels[0]:
-            return data['Adj Close'].iloc[:, 0]
-        elif 'Close' in data.columns:
-            return data['Close']  # Fallback to Close
+        # Handle MultiIndex columns (yfinance sometimes adds ticker to column names)
+        if isinstance(data.columns, pd.MultiIndex):
+            # Get Adj Close if available, otherwise Close
+            if 'Adj Close' in data.columns.get_level_values(0):
+                return data['Adj Close'].iloc[:, 0]  # Get first (and only) ticker column
+            elif 'Close' in data.columns.get_level_values(0):
+                return data['Close'].iloc[:, 0]
         else:
-            return None
+            # Regular column structure
+            if 'Adj Close' in data.columns:
+                return data['Adj Close']
+            elif 'Close' in data.columns:
+                return data['Close']
+        
+        return None
             
     except Exception as e:
         print(f"Error downloading {ticker}: {e}")
