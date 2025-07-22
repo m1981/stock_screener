@@ -1,0 +1,17 @@
+[browser]
+serverAddress = "localhost"
+serverPort = 8501
+
+[server]
+runOnSave = true
+maxUploadSize = 200
+enableCORS = false
+enableXsrfProtection = true
+enableWebsocketCompression = true
+
+[theme]
+base = "light"
+primaryColor = "#FF4B4B"
+
+[logger]
+level = "info"
