@@ -150,4 +150,8 @@ class ScreenerEngine:
     
     def safe_download(self, ticker: str, start_date: datetime, end_date: datetime) -> pd.Series:
         """Download stock data safely using DataManager"""
-        return self.data_manager.get_stock_data(ticker, start_date, end_date)
+        try:
+            return self.data_manager.get_stock_data(ticker, start_date, end_date)
+        except Exception as e:
+            logger.error(f"Error downloading data for {ticker}: {e}")
+            return None

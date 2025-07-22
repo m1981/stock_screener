@@ -80,13 +80,25 @@ class TestScreenerEngine:
         # Then
         assert metrics is None
     
-    @patch('screener_engine.yf.download')
-    def test_should_handle_download_errors_gracefully(self, mock_yf_download):
+    @patch('screener_engine.DataManager.get_stock_data')
+    def test_should_handle_download_errors_gracefully(self, mock_get_data):
         # Given
-        mock_yf_download.side_effect = Exception("Network error")
+        mock_get_data.side_effect = Exception("Network error")
         
         # When
         result = self.engine.safe_download('AAPL', datetime.now() - timedelta(days=30), datetime.now())
         
         # Then
         assert result is None
+
+    @patch('screener_engine.DataManager.get_stock_data')
+    def test_should_handle_data_manager_errors(self, mock_get_data):
+        # Given
+        mock_get_data.return_value = None
+        
+        # When
+        result = self.engine.safe_download('AAPL', datetime.now() - timedelta(days=30), datetime.now())
+        
+        # Then
+        assert result is None
+        mock_get_data.assert_called_once()

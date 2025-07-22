@@ -10,9 +10,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 class DataManager:
-    def __init__(self, cache_dir="cache"):
+    def __init__(self, cache_dir="cache", min_data_points=10):
         self.cache_dir = cache_dir
         self.db_path = f"{cache_dir}/stock_data.db"
+        self.min_data_points = min_data_points
         self._init_db()
     
     def _init_db(self):
@@ -37,6 +38,10 @@ class DataManager:
     @lru_cache(maxsize=100)
     def get_stock_data(self, ticker, start_date, end_date):
         """Check cache first, then fetch if needed"""
+        # Validate date parameters
+        if start_date >= end_date:
+            raise ValueError(f"Start date ({start_date}) must be before end date ({end_date})")
+        
         cached_data = self._get_cached_data(ticker, start_date, end_date)
         if cached_data is not None:
             return cached_data
@@ -80,7 +85,12 @@ class DataManager:
             # Extract price series (handle both single and multi-ticker downloads)
             if isinstance(data.columns, pd.MultiIndex):
                 if 'Close' in data.columns.get_level_values(0):
-                    price_series = data['Close'].iloc[:, 0] if len(data['Close'].columns) > 1 else data['Close']
+                    # Handle multiple tickers or single ticker with MultiIndex
+                    close_data = data['Close']
+                    if isinstance(close_data, pd.DataFrame):
+                        price_series = close_data.iloc[:, 0]  # First ticker
+                    else:
+                        price_series = close_data  # Single ticker
                 else:
                     price_series = data.iloc[:, 0]
             else:
@@ -89,13 +99,13 @@ class DataManager:
             # Clean the data
             price_series = price_series.dropna()
             
-            if len(price_series) < 10:
+            if len(price_series) < self.min_data_points:
                 logger.warning(f"Insufficient data for {ticker}: {len(price_series)} points")
                 return None
             
             logger.info(f"Successfully fetched {len(price_series)} data points for {ticker}")
             return price_series
-            
+        
         except Exception as e:
             logger.error(f"Failed to fetch data for {ticker}: {e}")
             return None
