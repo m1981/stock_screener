@@ -23,40 +23,46 @@ class ScreenerEngine:
     
     def screen_stocks(self, tickers: List[str], benchmark: str, lookback: int) -> pd.DataFrame:
         """Run screening analysis on stocks"""
-        logger.info(f"Starting screening for {len(tickers)} tickers with benchmark {benchmark}")
         results = []
         
-        # Calculate date range
+        # Calculate date range with larger buffer for trading days
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=lookback + 100)  # Extra buffer
+        # Use 1.5x multiplier to account for weekends, holidays, and alignment losses
+        buffer_days = max(100, int(lookback * 1.5))
+        start_date = end_date - timedelta(days=lookback + buffer_days)
+        
+        logger.info(f"Starting screening for {len(tickers)} tickers with benchmark {benchmark}")
         logger.info(f"Date range: {start_date} to {end_date}")
+        logger.info(f"Lookback period: {lookback} days")
         
         # Get benchmark data
         logger.info(f"Fetching benchmark data for {benchmark}")
         benchmark_data = self.safe_download(benchmark, start_date, end_date)
         if benchmark_data is None:
             raise ValueError(f"Cannot fetch benchmark data for {benchmark}")
+        
         logger.info(f"Benchmark data fetched: {len(benchmark_data)} points")
         
         # Process each ticker
         for ticker in tickers:
             try:
                 logger.info(f"Processing ticker: {ticker}")
-                
                 # Sanitize ticker
                 clean_ticker = self.validator.sanitize_ticker(ticker)
-                logger.debug(f"Sanitized ticker: {clean_ticker}")
                 
                 # Get stock data
                 logger.info(f"Fetching stock data for {clean_ticker}")
                 stock_data = self.safe_download(clean_ticker, start_date, end_date)
-                logger.info(f"Stock data fetched for {clean_ticker}: {len(stock_data) if stock_data is not None else 0} points")
+                
+                if stock_data is None:
+                    logger.warning(f"No data available for {clean_ticker}")
+                    continue
+                    
+                logger.info(f"Stock data fetched for {clean_ticker}: {len(stock_data)} points")
                 
                 # Validate data
                 logger.info(f"Validating data for {clean_ticker}")
                 is_valid, message = self.validator.validate_stock_data(stock_data, clean_ticker)
-                logger.info(f"Validation result for {clean_ticker}: {is_valid}, {message}")
-                
                 if not is_valid:
                     logger.warning(f"Validation failed for {clean_ticker}: {message}")
                     continue
@@ -69,12 +75,12 @@ class ScreenerEngine:
                 if metrics:
                     metrics['Ticker'] = clean_ticker
                     results.append(metrics)
-                    logger.info(f"Added results for {clean_ticker}")
+                    logger.info(f"Successfully processed {clean_ticker}")
                 else:
                     logger.warning(f"No metrics calculated for {clean_ticker}")
                     
             except Exception as e:
-                logger.error(f"Error processing {ticker}: {e}", exc_info=True)
+                logger.error(f"Error processing {ticker}: {e}")
                 continue
         
         logger.info(f"Screening complete. {len(results)} stocks processed successfully")
